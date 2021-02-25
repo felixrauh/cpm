@@ -273,18 +273,18 @@ class CriticalPathMethod(object):
     def __print_graph(self):
         # A method that helps with debugging the algorithm.
         # There is no actual use in the execution of cpm.
-        print 'Nodes:'
+        print( 'Nodes:')
         for node in self.graph.nodes():
-            print str(node) + ': ' + str(self.graph.node[node])
-        print 'Edges:'
+            print( str(node) + ': ' + str(self.graph.node[node]))
+        print( 'Edges:')
         for edge in self.graph.edges():
-            print str(edge) + ': ' + str(self.graph.edge[edge[0]][edge[1]])
-        print 'Critical Activities:'
+            print( str(edge) + ': ' + str(self.graph.edge[edge[0]][edge[1]]))
+        print( 'Critical Activities:')
         critical_activities = []
         for node1, node2 in self.graph.edges():
             if self.graph.edge[node1][node2]['total_float'] == 0:
                 critical_activities.append((node1, node2))
-        print critical_activities
+        print( critical_activities)
 
     def run_cpm(self):
         """The high-level actions of the CPM algorithm."""
