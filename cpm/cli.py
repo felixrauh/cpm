@@ -66,8 +66,9 @@ def main():
         ])
     print(results_table)
 
-    print('The optimum solution is {} for total cost and {} for project duration.'\
-        .format(optimum_solution[0], optimum_solution[1]))
+    print('The optimum solution is {} for total cost and {} for project duration.' \
+          .format(optimum_solution[0], optimum_solution[1]))
+
 
 if __name__ == '__main__':
     main()

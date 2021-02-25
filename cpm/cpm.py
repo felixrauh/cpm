@@ -109,8 +109,9 @@ def validate(project_file):
 
 def draw_network(graph, pos, images_dir, iteration):
     warnings.filterwarnings('ignore')
-    node_labels = dict((n, str(str(n) + '(' + str(d['eet']) + ',' + str(d['let']) + ')')) for n, d in graph.nodes(data=True))
-    edge_labels = dict([((u, v), graph.edge[u][v]['normal_duration']) for u, v in graph.edges()])
+    node_labels = dict(
+        (n, str(str(n) + '(' + str(d['eet']) + ',' + str(d['let']) + ')')) for n, d in graph.nodes(data=True))
+    edge_labels = dict([((u, v), graph.edges[u, v]['normal_duration']) for u, v in graph.edges()])
     networkx.draw_networkx_labels(graph, pos, labels=node_labels)
     networkx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels)
     networkx.draw_networkx(graph, pos=pos, with_labels=False, node_size=3000, node_color='c', node_shape='o')
@@ -138,7 +139,9 @@ class CriticalPathMethod(object):
         self.graph = networkx.DiGraph(indirect_cost=project['info']['indirect_cost'])
         self.graph.add_edges_from(project['activities'])
         self.snapshots = []
-        self.paths = self.__find_all_simple_paths(source=self.graph.nodes()[0], target=self.graph.nodes()[-1])
+        self.paths = self.__find_all_simple_paths(source=list(self.graph.nodes())[0],
+                                                  target=list(self.graph.nodes())[-1])
+        self.topological_node_sorting = list(networkx.topological_sort(self.graph))
 
     def __find_all_simple_paths(self, source, target):
         """Finds all the paths between two nodes of a graph.
@@ -156,14 +159,14 @@ class CriticalPathMethod(object):
         for i, path in enumerate(networkx.all_simple_paths(self.graph, source, target)):
             paths.append([])
             for j, elem in enumerate(path):
-                if j+1 <= len(path)-1:
-                    paths[i].append((path[j], path[j+1]))
+                if j + 1 <= len(path) - 1:
+                    paths[i].append((path[j], path[j + 1]))
         return paths
 
     def _calculate_cost_slope(self):
         """Calculates the cost slope of every activity in the network."""
         for node1, node2 in self.graph.edges():
-            activity = self.graph.edge[node1][node2]
+            activity = self.graph.edges[node1, node2]
             try:
                 activity['cost_slope'] = ((activity['crash_cost'] - activity['normal_cost']) /
                                           (activity['normal_duration'] - activity['crash_duration']))
@@ -177,40 +180,40 @@ class CriticalPathMethod(object):
         self.__calculate_total_float(kw_duration)
 
     def __calculate_earliest_event_time(self, kw_duration):
-        for node in self.graph.nodes():
+        for node in self.topological_node_sorting:
             max_eet = 0
             if self.graph.predecessors(node):
                 for predecessor in self.graph.predecessors(node):
-                    eet = self.graph.node[predecessor]['eet'] + self.graph.edge[predecessor][node][kw_duration]
+                    eet = self.graph.nodes[predecessor]['eet'] + self.graph.edges[predecessor, node][kw_duration]
                     if max_eet < eet:
                         max_eet = eet
-            self.graph.node[node]['eet'] = max_eet
+            self.graph.nodes[node]['eet'] = max_eet
 
     def __calculate_latest_event_time(self, kw_duration):
-        for node in reversed(self.graph.nodes()):
+        for node in reversed(self.topological_node_sorting):
             if not self.graph.successors(node):
-                self.graph.node[node]['let'] = self.graph.node[node]['eet']
+                self.graph.nodes[node]['let'] = self.graph.nodes[node]['eet']  # TODO Update with release time/dead line
             else:
-                min_let = self.graph.node[self.graph.nodes()[-1]]['eet']
+                min_let = self.graph.nodes[self.topological_node_sorting[-1]]['eet']
                 for successor in self.graph.successors(node):
-                    let = self.graph.node[successor]['let'] - self.graph.edge[node][successor][kw_duration]
+                    let = self.graph.nodes[successor]['let'] - self.graph.edges[node, successor][kw_duration]
                     if min_let > let:
                         min_let = let
-                self.graph.node[node]['let'] = min_let
+                self.graph.nodes[node]['let'] = min_let
 
     def __calculate_total_float(self, kw_duration):
         for node1, node2 in self.graph.edges():
-            activity = self.graph.edge[node1][node2]
-            activity['total_float'] = (self.graph.node[node2]['let'] - self.graph.node[node1]['eet'] -
+            activity = self.graph.edges[node1, node2]
+            activity['total_float'] = (self.graph.nodes[node2]['let'] - self.graph.nodes[node1]['eet'] -
                                        activity[kw_duration])
 
     def __get_network_duration(self):
-        return self.graph.node[self.graph.nodes()[-1]]['let']
+        return self.graph.nodes[self.topological_node_sorting[-1]]['let']
 
     def __get_direct_cost(self, kw_cost='normal_cost'):
         direct_cost = 0
         for node1, node2 in self.graph.edges():
-            direct_cost += self.graph.edge[node1][node2][kw_cost]
+            direct_cost += self.graph.edges[node1, node2][kw_cost]
         return direct_cost
 
     def __get_indirect_cost(self):
@@ -228,7 +231,7 @@ class CriticalPathMethod(object):
         """
         critical_activities = []
         for node1, node2 in self.graph.edges():
-            if self.graph.edge[node1][node2]['total_float'] == 0:
+            if self.graph.edges[node1, node2]['total_float'] == 0:
                 critical_activities.append((node1, node2))
         return critical_activities
 
@@ -251,9 +254,9 @@ class CriticalPathMethod(object):
         return critical_paths
 
     def __remove_crashed_activities(self, critical_path):
-        return filter(lambda critical_activity:
-                      self.graph.edge[critical_activity[0]][critical_activity[1]]['normal_duration'] >
-                      self.graph.edge[critical_activity[0]][critical_activity[1]]['crash_duration'], critical_path)
+        return [critical_activity for critical_activity in critical_path if
+                self.graph.edges[critical_activity[0], critical_activity[1]]['normal_duration'] >
+                self.graph.edges[critical_activity[0], critical_activity[1]]['crash_duration']]
 
     def _reduce_network_duration(self):
         critical_activities = self.__get_critical_activities()
@@ -262,29 +265,29 @@ class CriticalPathMethod(object):
             critical_path = self.__remove_crashed_activities(critical_path)
             if len(critical_path) > 0:
                 min_critical_activity = critical_path[0]
-                min_cost_slope = self.graph.edge[min_critical_activity[0]][min_critical_activity[1]]['cost_slope']
+                min_cost_slope = self.graph.edges[min_critical_activity[0], min_critical_activity[1]]['cost_slope']
                 for critical_activity in critical_path[1:]:
-                    if self.graph.edge[critical_activity[0]][critical_activity[1]]['cost_slope'] < min_cost_slope:
+                    if self.graph.edges[critical_activity[0], critical_activity[1]]['cost_slope'] < min_cost_slope:
                         min_critical_activity = critical_activity
-                        min_cost_slope = self.graph.edge[critical_activity[0]][critical_activity[1]]['cost_slope']
-                self.graph.edge[min_critical_activity[0]][min_critical_activity[1]]['normal_duration'] -= 1
-                self.graph.edge[min_critical_activity[0]][min_critical_activity[1]]['normal_cost'] += min_cost_slope
+                        min_cost_slope = self.graph.edges[critical_activity[0], critical_activity[1]]['cost_slope']
+                self.graph.edges[min_critical_activity[0], min_critical_activity[1]]['normal_duration'] -= 1
+                self.graph.edges[min_critical_activity[0], min_critical_activity[1]]['normal_cost'] += min_cost_slope
 
     def __print_graph(self):
         # A method that helps with debugging the algorithm.
         # There is no actual use in the execution of cpm.
-        print( 'Nodes:')
+        print('Nodes:')
         for node in self.graph.nodes():
-            print( str(node) + ': ' + str(self.graph.node[node]))
-        print( 'Edges:')
+            print(str(node) + ': ' + str(self.graph.nodes[node]))
+        print('Edges:')
         for edge in self.graph.edges():
-            print( str(edge) + ': ' + str(self.graph.edge[edge[0]][edge[1]]))
-        print( 'Critical Activities:')
+            print(str(edge) + ': ' + str(self.graph.edges[edge[0], edge[1]]))
+        print('Critical Activities:')
         critical_activities = []
         for node1, node2 in self.graph.edges():
-            if self.graph.edge[node1][node2]['total_float'] == 0:
+            if self.graph.edges[node1, node2]['total_float'] == 0:
                 critical_activities.append((node1, node2))
-        print( critical_activities)
+        print(critical_activities)
 
     def run_cpm(self):
         """The high-level actions of the CPM algorithm."""
