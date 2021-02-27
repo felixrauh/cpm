@@ -135,13 +135,18 @@ class CriticalPathMethod(object):
             where each path is composed of activities in the form of tuples.
     """
 
-    def __init__(self, project):
-        self.graph = networkx.DiGraph(indirect_cost=project['info']['indirect_cost'])
-        self.graph.add_edges_from(project['activities'])
+    def __init__(self, graph):
+        self.graph = graph
         self.snapshots = []
-        self.paths = self.__find_all_simple_paths(source=list(self.graph.nodes())[0],
-                                                  target=list(self.graph.nodes())[-1])
         self.topological_node_sorting = list(networkx.topological_sort(self.graph))
+        self.paths = self.__find_all_simple_paths(source=self.topological_node_sorting[0],
+                                                  target=self.topological_node_sorting[-1])
+
+    @classmethod
+    def from_json(cls, project):
+        graph = networkx.DiGraph(indirect_cost=project['info']['indirect_cost'])
+        graph.add_edges_from(project['activities'])
+        return cls(graph)
 
     def __find_all_simple_paths(self, source, target):
         """Finds all the paths between two nodes of a graph.
@@ -189,14 +194,36 @@ class CriticalPathMethod(object):
                         max_eet = eet
             self.graph.nodes[node]['eet'] = max_eet
 
+    def __calculate_earliest_event_time_with_release_times(self, node_duration):
+        for node in self.topological_node_sorting:
+            max_eet = self.graph.nodes[node]['release_time']
+            if self.graph.predecessors(node):
+                for predecessor in self.graph.predecessors(node):
+                    eet = self.graph.nodes[predecessor]['eet'] + self.graph.nodes[predecessor][node_duration]
+                    if max_eet < eet:
+                        max_eet = eet
+            self.graph.nodes[node]['eet'] = max_eet
+
     def __calculate_latest_event_time(self, kw_duration):
         for node in reversed(self.topological_node_sorting):
             if not self.graph.successors(node):
-                self.graph.nodes[node]['let'] = self.graph.nodes[node]['eet']  # TODO Update with release time/dead line
+                self.graph.nodes[node]['let'] = self.graph.nodes[node]['eet']
             else:
                 min_let = self.graph.nodes[self.topological_node_sorting[-1]]['eet']
                 for successor in self.graph.successors(node):
                     let = self.graph.nodes[successor]['let'] - self.graph.edges[node, successor][kw_duration]
+                    if min_let > let:
+                        min_let = let
+                self.graph.nodes[node]['let'] = min_let
+
+    def __calculate_latest_event_time_with_latest_start_time(self, node_duration):
+        for node in reversed(self.topological_node_sorting):
+            if not self.graph.successors(node):
+                self.graph.nodes[node]['let'] = self.graph.nodes[node]['latest_start_time']
+            else:
+                min_let = self.graph.nodes[node]['latest_start_time']
+                for successor in self.graph.successors(node):
+                    let = self.graph.nodes[successor]['let'] - self.graph.nodes[node][node_duration]
                     if min_let > let:
                         min_let = let
                 self.graph.nodes[node]['let'] = min_let
@@ -206,6 +233,10 @@ class CriticalPathMethod(object):
             activity = self.graph.edges[node1, node2]
             activity['total_float'] = (self.graph.nodes[node2]['let'] - self.graph.nodes[node1]['eet'] -
                                        activity[kw_duration])
+
+    def __calculate_node_slack(self):
+        for node in self.topological_node_sorting:
+            self.graph.nodes[node]['slack'] = (self.graph.nodes[node]['let'] - self.graph.nodes[node]['eet'])
 
     def __get_network_duration(self):
         return self.graph.nodes[self.topological_node_sorting[-1]]['let']
@@ -288,6 +319,14 @@ class CriticalPathMethod(object):
             if self.graph.edges[node1, node2]['total_float'] == 0:
                 critical_activities.append((node1, node2))
         print(critical_activities)
+
+    def run_time_window_cpm(self):
+        """
+        Runs a cpm without crash cost/duration, but with release times/deadlines for jobs
+        """
+        self.__calculate_earliest_event_time_with_release_times('processing_time')
+        self.__calculate_latest_event_time_with_latest_start_time('processing_time')
+        self.__calculate_node_slack()
 
     def run_cpm(self):
         """The high-level actions of the CPM algorithm."""

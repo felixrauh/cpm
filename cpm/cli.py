@@ -52,7 +52,7 @@ def main():
         sys.exit(1)
     images_dir = arguments.images_dir + '/' if arguments.images_dir else ''
 
-    cpmnet = cpm.CriticalPathMethod(project)
+    cpmnet = cpm.CriticalPathMethod.from_json(project)
     cpmnet.run_cpm()
     results, images, optimum_solution = cpmnet.get_results(images_dir)
 
